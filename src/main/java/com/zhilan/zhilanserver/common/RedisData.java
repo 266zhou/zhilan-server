@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
  *
  * @param<T> 真实的数据类型
  */
+@Data
 public class RedisData<T> implements Serializable {
 
     /** 逻辑过期时间：Redis 里的 key 本身永不过期，靠这个字段判断“逻辑上是否过期” */
