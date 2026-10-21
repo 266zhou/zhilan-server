@@ -11,7 +11,7 @@ public final class RedisKeyConstants {
     }
 
     /** 商家详情缓存：cache:shop:{id} */
-    public static final String CACHE_SHOP_KEY = "chche:shop";
+    public static final String CACHE_SHOP_KEY = "cache:shop:";
 
     /** 商家详情缓存逻辑过期时间（秒） */
     public static final Long CACHE_SHOP_TTL = 1800L;

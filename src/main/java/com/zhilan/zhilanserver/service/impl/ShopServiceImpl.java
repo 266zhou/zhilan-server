@@ -4,17 +4,25 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zhilan.zhilanserver.common.BusinessException;
+import com.zhilan.zhilanserver.constant.RedisKeyConstants;
 import com.zhilan.zhilanserver.dto.ShopQueryDTO;
 import com.zhilan.zhilanserver.entity.Shop;
 import com.zhilan.zhilanserver.mapper.ShopMapper;
 import com.zhilan.zhilanserver.service.ShopService;
+import com.zhilan.zhilanserver.utils.CacheClient;
+import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
+@RequiredArgsConstructor
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper,Shop> implements ShopService {
+
+    private final CacheClient cacheClient;
 
     private static final Set<String> SORT_FIELDS = Set.of("score","sales","avgPrice");
 
@@ -55,10 +63,47 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper,Shop> implements Sho
         if (id == null || id <= 0) {
             throw new BusinessException(400,"商家ID不合法");
         }
-        Shop shop = getById(id);
+        Shop shop = cacheClient.queryWithLogicalExpire(
+                RedisKeyConstants.CACHE_SHOP_KEY,
+                id,
+                Shop.class,
+                this::getById,
+                RedisKeyConstants.CACHE_SHOP_TTL,
+                TimeUnit.SECONDS);
+
         if (shop == null) {
             throw new BusinessException(404,"商家不存在或已下架");
         }
         return shop;
+    }
+
+    @Override
+    public Long createShop(Shop shop) {
+        shop.setId(null);
+        shop.setSales(shop.getSales() == null ? 0 : shop.getSales());
+        shop.setComments(shop.getComments() == null ? 0 : shop.getComments());
+        shop.setStatus(shop.getStatus() == null ? 1 : shop.getStatus());
+        save(shop);
+        return shop.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateShop(Shop shop) {
+        if (shop.getId() == null) {
+            throw new BusinessException(400,"id 不能为空");
+        }
+        updateById(shop);
+        cacheClient.detele(RedisKeyConstants.CACHE_SHOP_KEY + shop.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteShop(Long id) {
+        if (id == null || id <= 0) {
+            throw new BusinessException(400,"商家ID不合法");
+        }
+        removeById(id);
+        cacheClient.detele(RedisKeyConstants.CACHE_SHOP_KEY + id);
     }
 }
