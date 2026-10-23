@@ -32,6 +32,40 @@ CREATE TABLE `shop` (
     KEY `idx_name` (`name`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '商家表';
 
+-- 秒杀优惠券
+DROP TABLE IF EXISTS `seckill_voucher`;
+CREATE TABLE `seckill_voucher` (
+    `id`           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `shop_id`      BIGINT       NOT NULL COMMENT '所属商家',
+    `title`        VARCHAR(64)  NOT NULL COMMENT '券标题',
+    `sub_title`    VARCHAR(128) DEFAULT NULL COMMENT '副标题',
+    `stock`        INT          NOT NULL DEFAULT 0 COMMENT '库存',
+    `begin_time`   DATETIME     NOT NULL COMMENT '秒杀开始时间',
+    `end_time`     DATETIME     NOT NULL COMMENT '秒杀结束时间',
+    `pay_value`    BIGINT       NOT NULL DEFAULT 0 COMMENT '支付金额（分）',
+    `actual_value` BIGINT       NOT NULL DEFAULT 0 COMMENT '抵扣金额（分）',
+    `status`       TINYINT      NOT NULL DEFAULT 1 COMMENT '状态 1上架 0下架',
+    `create_time`  DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_shop_id`(`shop_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT  = '秒杀优惠券';
+
+-- 优惠券订单
+DROP TABLE IF EXISTS `voucher_order`;
+CREATE TABLE `voucher_order` (
+    `id`          BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id`     BIGINT   NOT NULL COMMENT '下单用户',
+    `voucher_id`  BIGINT   NOT NULL COMMENT '优惠券id',
+    `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1未支付 2已支付 3已取消 4已退款',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `pay_time` DATETIME DEFAULT NULL COMMENT '支付时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_voucher` (`user_id`,`voucher_id`),
+    KEY `idx_voucher_id` (`voucher_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '优惠券订单';
+
 -- 示例数据
 INSERT INTO `shop` (`name`, `type`, `city`, `address`, `phone`, `business_hours`, `avg_price`, `score`, `sales`, `comments`, `description`) VALUES
 ('老王火锅',   '美食',   '杭州', '西湖区文三路100号',  '0571-88880001', '10:00-22:00', 98,  4.8, 1200, 320, '地道川味火锅，麻辣鲜香'),
@@ -39,3 +73,9 @@ INSERT INTO `shop` (`name`, `type`, `city`, `address`, `phone`, `business_hours`
 ('悦心足道',   '休闲娱乐', '杭州', '拱墅区莫干山路66号', '0571-88880003', '12:00-02:00', 168, 4.6, 800,  150, '中式足疗按摩SPA'),
 ('云朵酒店',   '酒店民宿', '杭州', '滨江区江南大道500号', '0571-88880004', '24小时',    320, 4.7, 950,  260, '江景商务酒店'),
 ('美发沙龙',   '丽人',   '杭州', '萧山区市心路20号',  '0571-88880005', '09:00-21:00', 120, 4.4, 600,  90,  '日系造型设计');
+
+INSERT INTO `seckill_voucher`
+(`shop_id`, `title`, `sub_title`, `stock`, `begin_time`, `end_time`, `pay_value`, `actual_value`, `status`)
+VALUES
+    (1, '老王火锅 5 折券',  '限时秒杀，手慢无', 100, '2026-01-01 00:00:00', '2030-12-31 23:59:59', 4900, 5000, 1),
+    (2, '星聚咖啡 8 折券',  '每日一杯',        50,  '2026-01-01 00:00:00', '2030-12-31 23:59:59', 2800, 700,  1);
