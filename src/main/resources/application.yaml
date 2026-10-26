@@ -43,11 +43,7 @@ spring:
     listener:
       simple:
         acknowledge-mode: manual         # 消费者手动 ack，保证不丢消息
-        retry:
-          enabled: true
-          max-attempts: 3
-          initial-interval: 1000ms
-          multiplier: 2
+        prefetch: 1                      # 每个消费者一次只取 1 条，避免堆积在内存
 
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
