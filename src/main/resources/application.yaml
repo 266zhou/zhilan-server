@@ -67,3 +67,13 @@ logging:
   level:
     com.zhilan.zhilanserver: debug
     org.springframework.data.redis: warn
+  file:
+    name: logs/zhilan-server.log
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 7
+
+zhilan:
+  order:
+    timeout-minutes: 15   # 订单超时时长（分钟），测试时可改成 1

@@ -5,7 +5,10 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import lombok.Data;
+
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
@@ -16,6 +19,9 @@ import java.time.LocalDateTime;
 @Data
 @TableName("voucher_order")
 public class VoucherOrder implements Serializable {
+
+    /** 订单有效标志 */
+   public static final int ACTIVE_FLAG_VALID = 1;
 
     /** 订单状态常量 */
     public static final int STATUS_UNPAID = 1;     //未支付
@@ -42,4 +48,11 @@ public class VoucherOrder implements Serializable {
 
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
+
+    /** 乐观锁版本号 */
+    @Version
+    private Integer version;
+
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Integer activeFlag;
 }

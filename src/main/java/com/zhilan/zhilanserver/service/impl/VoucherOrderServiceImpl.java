@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Slf4j
@@ -107,7 +108,10 @@ public class VoucherOrderServiceImpl
     public VoucherOrder getOrderByUser(Long voucherId, Long userId) {
         return getOne(new LambdaQueryWrapper<VoucherOrder>()
                 .eq(VoucherOrder::getVoucherId, voucherId)
-                .eq(VoucherOrder::getUserId, userId));
+                .eq(VoucherOrder::getUserId, userId)
+                .eq(VoucherOrder::getActiveFlag, VoucherOrder.ACTIVE_FLAG_VALID)
+                .orderByDesc(VoucherOrder::getId)
+                .last("LIMIT 1"));
     }
 
     @Override
@@ -116,12 +120,13 @@ public class VoucherOrderServiceImpl
         Long voucherId = message.getVoucherId();
         Long userId = message.getUserId();
 
-        // 幂等检查 订单已存在就直接返回
+        // 幂等检查 只查有效订单（⭐ 加了 active_flag 条件）
         long exists = count(new LambdaQueryWrapper<VoucherOrder>()
                 .eq(VoucherOrder::getUserId,userId)
-                .eq(VoucherOrder::getVoucherId,voucherId));
+                .eq(VoucherOrder::getVoucherId,voucherId)
+                .eq(VoucherOrder::getActiveFlag,VoucherOrder.ACTIVE_FLAG_VALID));
         if (exists > 0) {
-            log.info("[MQ] 订单已存在，跳过处理（幂等）voucherId={}, userId={}",voucherId,userId);
+            log.info("[MQ] 有效订单已存在，跳过处理（幂等）voucherId={}, userId={}",voucherId,userId);
             return;
         }
 
@@ -143,6 +148,109 @@ public class VoucherOrderServiceImpl
         order.setUserId(userId);
         order.setVoucherId(voucherId);
         order.setStatus(VoucherOrder.STATUS_UNPAID);
+        order.setActiveFlag(VoucherOrder.ACTIVE_FLAG_VALID);
         save(order);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean payOrder(Long orderId, Long userId) {
+        //先查（必须！ 乐观锁要求先拿到当前 version）
+        VoucherOrder order = getById(orderId);
+        if (order == null) {
+            throw new BusinessException(404,"订单不存在");
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(403,"无权操作此订单");
+        }
+        if (order.getStatus() == VoucherOrder.STATUS_PAID) {
+            throw new BusinessException(400,"订单已支付，请勿重复支付");
+        }
+        if (order.getStatus() == VoucherOrder.STATUS_CANCELED) {
+            throw new BusinessException(400,"订单已关闭，无法支付");
+        }
+
+        // 乐观锁更新（插件自动加 version 条件）
+        order.setStatus(VoucherOrder.STATUS_PAID);
+        order.setPayTime(LocalDateTime.now());
+        boolean success = updateById(order);
+
+        if (!success) {
+            // version 不匹配 -> 被人改过了 （可能是定时任务刚关单）
+            log.warn("[支付] 乐观锁冲突，orderId={}",orderId);
+            //重新查一次，给出准确提示
+            VoucherOrder latest = getOne(new LambdaQueryWrapper<VoucherOrder>()
+                    .eq(VoucherOrder::getId, orderId)
+                    .last("FOR UPDATE"));
+
+            if (latest != null && latest.getStatus() == VoucherOrder.STATUS_CANCELED) {
+                throw new BusinessException(400,"订单已超时关闭，无法支付");
+            }
+            if (latest != null && latest.getStatus() == VoucherOrder.STATUS_PAID) {
+                throw new BusinessException(400,"订单已支付");
+            }
+            throw new BusinessException(409,"订单状态已变更，请刷新后重试");
+        }
+
+        log.info("[支付] 订单 {} 支付成功 userId={}", orderId, userId);
+        return true;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean closeOrder(Long orderId) {
+        // 先查（拿version）
+        VoucherOrder order = getById(orderId);
+        if (order == null) {
+            return false;
+        }
+        // 快速判断：不是未支付状态就不用管
+        if (order.getStatus() != VoucherOrder.STATUS_UNPAID) {
+            return false;
+        }
+
+        // 乐观锁更新状态：1（未支付） -> 3（已取消），同时让出唯一索引槽位
+        order.setStatus(VoucherOrder.STATUS_CANCELED);
+        order.setActiveFlag(null);     //   关键：置 NULL，允许用户重新购买
+        boolean success = updateById(order);
+
+        if (!success) {
+            // 没抢到！说明：
+            // -用户刚好支付了 （status 变为2 ， version 变了）
+            // -或者别的线程已经关过了
+            // -> 什么都不做，绝不能回补库存！
+            log.info("[关单] 乐观锁冲突，跳过 orderId={}", orderId);
+            return false;
+        }
+
+        // 到这里说明我成功抢到了关单权 -> 才回补库存
+        Long voucherId = order.getVoucherId();
+        Long userId = order.getUserId();
+
+        // 回补数据库库存
+        seckillVoucherService.update(
+                new LambdaUpdateWrapper<SeckillVoucher>()
+                        .setSql("stock = stock + 1")
+                        .eq(SeckillVoucher::getId, voucherId));
+
+        // 回补 Redis 库存 + 移除用户下单标记
+        stringRedisTemplate.opsForValue()
+                .increment(RedisKeyConstants.SECKILL_STOCK_KEY + voucherId);
+
+        // 把用户从“已下单集合”移除 -> 重新获得购买资格
+        stringRedisTemplate.opsForSet()
+                .remove(RedisKeyConstants.SECKILL_ORDER_KEY + voucherId, String.valueOf(userId));
+
+        log.info("[关单] 订单 {} 已关闭，库存已回补，用户可重新购买 voucherId={}, userId={}", orderId, voucherId, userId);
+        return true;
+    }
+
+    @Override
+    public List<VoucherOrder> listOverdueOrders(LocalDateTime deadline, int limit) {
+        return list(new LambdaQueryWrapper<VoucherOrder>()
+                .eq(VoucherOrder::getStatus,VoucherOrder.STATUS_UNPAID)
+                .lt(VoucherOrder::getCreateTime, deadline)
+                .orderByAsc(VoucherOrder::getCreateTime)
+                .last("LIMIT " + limit));
     }
 }
